@@ -4,12 +4,11 @@ A Home Assistant card that shows the hourly forecast as one temperature line. Ea
 carries its temperature, condition icon and (optionally) wind speed, with the hour right
 underneath. Nothing else: no header, no attributes, no precipitation bars.
 
-![Basics: defaults, hide_repeats, show_wind, show_separators](docs/screenshots/basics.png)
+![Basics: defaults, show_wind, show_repeated_*, show_separators](docs/screenshots/basics.png)
 
 ```yaml
 type: custom:minimal-weather-line-chart
 entity: weather.home
-hide_repeats: true
 ```
 
 It is a fork of [mlamberts78/weather-chart-card](https://github.com/mlamberts78/weather-chart-card)
@@ -41,19 +40,29 @@ one, the card says so in place of the chart.
 
 ## Options
 
-Only `type` and `entity` are required. Every other option has a default that works on the
-standard dark and light themes.
+Always required:
+
+```yaml
+type: custom:minimal-weather-line-chart
+entity: weather.home
+```
+
+Every other option has a default that works on the standard dark and light themes. The
+card has a visual editor: add it from the card picker, or edit an existing card, and every
+option below appears as a form field with a short explanation.
 
 ### What is shown
 
 | Name | Default | Description |
 | --- | --- | --- |
 | `entity` | **required** | A `weather.*` entity with hourly forecast support. |
-| `hide_repeats` | `false` | Hide a temperature, condition icon or wind speed when it is the same as the previous hour. |
-| `show_separators` | same as `hide_repeats` | Thin vertical line wherever the condition changes, so each run of the same condition reads as a group. |
-| `show_wind` | `false` | Wind speed next to the temperature, in the entity's `wind_speed_unit`. |
+| `show_wind` | `false` | Wind speed on its own line under the temperature, in the entity's `wind_speed_unit`. |
+| `show_repeated_condition` | `false` | Show the condition icon even when it is the same as the previous hour. Off, only changes are shown. |
+| `show_repeated_temperature` | `false` | Same, for the temperature. |
+| `show_repeated_wind` | `false` | Same, for the wind speed. |
+| `show_separators` | `true` | Thin vertical line wherever the condition changes, so each run of the same condition reads as a group. |
 
-![Basics: defaults, hide_repeats, show_wind, show_separators](docs/screenshots/basics.png)
+![Basics: defaults, show_wind, show_repeated_*, show_separators](docs/screenshots/basics.png)
 
 ### Which hours
 
@@ -70,15 +79,25 @@ standard dark and light themes.
 
 | Name | Default | Description |
 | --- | --- | --- |
-| `chart_height` | `84` | Height in px of the line area, including the room for labels above and hours below. With `hours_next_to_line: false` the hour row is added below this. |
+| `chart_height` | `84` | Minimum height in px of the line area, including the room for labels above and hours below. With `hours_next_to_line: false` the hour row is added below this. |
 | `padding_top` | auto | Space in px above the highest point. Auto is just enough for the labels. |
 | `padding_bottom` | `5` | Card padding in px below the lowest content. |
 | `padding_x` | `8` | Card padding in px on the left and right. |
 | `line_width` | `2` | Line width in px. |
-| `dot_size` | `line_width + 2` | Radius in px of the dot at each data point. `0` removes the dots. Dots mark the hours whose values are hidden by `hide_repeats`. |
-| `stagger_labels` | `true` | When a label would overlap its left neighbour, lift it one row and grow the card to fit. `false` lets labels collide. |
+| `dot_size` | `line_width + 2` | Radius in px of the dot at each data point. `0` removes the dots. Dots mark the hours whose repeated values are hidden. |
+| `shrink_to_fit` | `true` | When neighbouring labels would overlap, shrink all label text (temperature, icon, wind, hours) in steps down to half size until they fit. `false` keeps the configured sizes, which may cause labels to overlap. |
 
-![Layout: dot_size, dot_color, chart_height, padding_bottom, stagger_labels](docs/screenshots/layout.png)
+The card fills whatever height its container gives it. In a sections view, set the
+card's `rows` in the layout options (or `grid_options: rows: 4`) and the line stretches to
+use the full height. In a masonry view, where nothing sets a height, the card is exactly
+`chart_height` tall.
+
+Twelve hours of full-size text do not fit in a normal-width card, so on most dashboards
+the text is shrunk a little. Fewer `hours`, a wider card, or hiding repeats (the default)
+give it more room. On a phone-width card with every value shown it can reach the half-size
+floor and still be tight.
+
+![Layout: dot_size, dot_color, chart_height, padding_bottom, filling a tall container, shrink_to_fit](docs/screenshots/layout.png)
 
 ### Colors and text
 
@@ -118,8 +137,12 @@ type: custom:minimal-weather-line-chart
 entity: weather.home
 hours: 12
 until_midnight: false
-hide_repeats: true
 show_wind: true
+show_repeated_condition: false
+show_repeated_temperature: false
+show_repeated_wind: false
+show_separators: true
+shrink_to_fit: true
 hours_next_to_line: true
 chart_height: 84
 padding_bottom: 5
@@ -150,18 +173,19 @@ condition_icon:
 | Change | Reason |
 | --- | --- |
 | Temperatures are plain text instead of Chart.js datalabels | The original draws each temperature in a box whose background comes from `--card-background-color` and whose text comes from `--primary-text-color`, read off `document.body`. On some themes those resolve to the same color or to nothing, so the numbers vanish and only a white box is left. Plain text in the DOM always uses the theme's text color. |
-| `hide_repeats` | Repeating a value that has not changed since the previous hour is noise. With repeats hidden, what remains is exactly the hours where something changes. |
+| Repeated values hidden by default | Repeating a value that has not changed since the previous hour is noise. What remains is exactly the hours where something changes. `show_repeated_condition`, `show_repeated_temperature` and `show_repeated_wind` turn them back on. |
 | Separators between condition groups | With repeats hidden, an icon only appears when the condition changes. A faint line at each change (cloudy, cloudy, cloudy, sunny, cloudy is 3 groups and 2 lines) shows how long each condition lasts. |
 | Dots on every data point | The line still has a point for every hour even when its label is hidden. The dots make those hours visible. |
 | Hours are `4pm`, never `4:00 PM` | Twelve columns are narrow. The short form fits and reads faster. |
 | Hour label under each point | Reading a value and then hunting for its hour along the bottom edge is slow. Keeping them together is faster. The bottom row is still available. |
-| Much less vertical space, all of it configurable | The original chart is 180px tall with generous padding. This one is 84px by default, with controls for height, top padding, bottom padding and side padding. |
-| Condition icon and wind next to the temperature | The original stacked icons and wind in separate rows above and below the chart. Everything for one hour is now one group. |
+| Much less vertical space, all of it configurable | The original chart is 180px tall with generous padding. This one is 84px by default, with controls for height, top padding, bottom padding and side padding, and it stretches to fill a taller container when the layout gives it one. |
+| Condition icon next to the temperature, wind on its own line beneath | The original stacked icons and wind in separate rows above and below the chart. Everything for one hour is now one group. Wind on the same line as the temperature was hard to read, so it gets its own line. |
 | Wind is optional and off by default | Most of the time only the temperature line matters. |
 | Per-element size, color and background | So the card can match any dashboard theme. |
 | `until_midnight` and `hours` | For "rest of today" and "next N hours" cards. |
-| Automatic label staggering | Twelve hours of icon plus temperature plus wind do not fit on one row in a normal-width card. A label that would collide with its left neighbour is lifted one row and the card grows to fit. |
+| Text shrinks to fit | Twelve hours of icon plus temperature do not fit at full size in a normal-width card. Rather than letting labels overlap or scatter them across rows, the card shrinks all label text until neighbours fit. `shrink_to_fit: false` turns that off. |
 | New card type `custom:minimal-weather-line-chart` | A different element name, so it can be installed alongside the original `weather-chart-card`. |
+| Visual editor | Every option is editable in the card editor, with a one-line explanation of each. |
 | No Chart.js, no datalabels plugin, no canvas, no Lit | The card is one file with no dependencies, and `dist/minimal-weather-line-chart.js` is the source as-is. |
 
 The original card's source is still in the repo (`src/main.js`) and builds to
