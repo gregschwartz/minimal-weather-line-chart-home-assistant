@@ -150,7 +150,7 @@ class MinimalWeatherLineChart extends HTMLElement {
   connectedCallback() {
     if (this._hass && this._config && !this._sub) this._subscribe();
     if (!this._resizeObserver && typeof ResizeObserver !== "undefined") {
-      // Label staggering depends on the card width, so re-layout on resize.
+      // Whether labels fit (and so how much text shrinks) depends on the card size, so re-layout on resize.
       this._resizeObserver = new ResizeObserver((entries) => {
         const box = entries[0] && entries[0].contentRect;
         const size = box ? Math.round(box.width) + "x" + Math.round(box.height) : "";
