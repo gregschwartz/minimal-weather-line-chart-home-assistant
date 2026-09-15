@@ -10,7 +10,8 @@
  */
 
 const CARD_TAG = "minimal-weather-line-chart";
-const CARD_VERSION = "1.1.0";
+const EDITOR_TAG = "minimal-weather-line-chart-editor";
+const CARD_VERSION = "1.2.0";
 
 const CONDITION_ICONS = {
   "clear-night": "weather-night",
@@ -40,9 +41,11 @@ const DEFAULTS = {
   hours: 12, // maximum number of hours shown
   until_midnight: false, // only show hours before the next local midnight (still capped by `hours`)
   show_wind: false,
-  hide_repeats: false,
-  show_separators: null, // null -> follows hide_repeats
-  stagger_labels: true, // lift a label one row when it would overlap its left neighbour
+  show_repeated_condition: false, // show the condition icon even when it is the same as the previous hour
+  show_repeated_temperature: false, // same, for the temperature
+  show_repeated_wind: false, // same, for the wind speed
+  show_separators: true, // thin vertical line wherever the condition changes
+  shrink_to_fit: true, // shrink label fonts until neighbouring labels no longer overlap
   hours_next_to_line: true, // hour label directly under each point instead of a row at the bottom
   chart_height: 84, // px, the line area including label room (a bottom hour row is added below it)
   padding_top: null, // px above the highest point; null -> just enough for the labels
@@ -77,7 +80,22 @@ const num = (v, fallback) => {
 class MinimalWeatherLineChart extends HTMLElement {
   static getStubConfig(hass) {
     const first = hass && hass.states ? Object.keys(hass.states).find((id) => id.indexOf("weather.") === 0) : null;
-    return { entity: first || "weather.home", hide_repeats: true };
+    return { entity: first || "weather.home" };
+  }
+
+  static async getConfigElement() {
+    // ha-form and the selectors it needs are lazy-loaded by Home Assistant. Loading a
+    // built-in card editor first guarantees they are defined before ours renders.
+    if (!customElements.get("ha-form") && window.loadCardHelpers) {
+      try {
+        const helpers = await window.loadCardHelpers();
+        const probe = helpers.createCardElement({ type: "entities", entities: [] });
+        if (probe && probe.constructor && probe.constructor.getConfigElement) await probe.constructor.getConfigElement();
+      } catch (e) {
+        /* fall through: ha-form is usually already defined by then */
+      }
+    }
+    return document.createElement(EDITOR_TAG);
   }
 
   constructor() {
@@ -89,6 +107,7 @@ class MinimalWeatherLineChart extends HTMLElement {
     this._sub = null;
     this._error = null;
     this._lastKey = null;
+    this._lastSize = null;
     this._resizeObserver = null;
   }
 
@@ -107,7 +126,8 @@ class MinimalWeatherLineChart extends HTMLElement {
     merged.padding_top = merged.padding_top == null ? null : num(merged.padding_top, null);
     merged.dot_size = Math.max(0, num(merged.dot_size, merged.line_width + 2));
     merged.dot_color = merged.dot_color || merged.line_color;
-    if (merged.show_separators == null) merged.show_separators = !!merged.hide_repeats;
+    merged.show_separators = merged.show_separators !== false;
+    merged.shrink_to_fit = merged.shrink_to_fit !== false;
 
     const entityChanged = !this._config || this._config.entity !== merged.entity;
     this._config = merged;
@@ -131,7 +151,11 @@ class MinimalWeatherLineChart extends HTMLElement {
     if (this._hass && this._config && !this._sub) this._subscribe();
     if (!this._resizeObserver && typeof ResizeObserver !== "undefined") {
       // Label staggering depends on the card width, so re-layout on resize.
-      this._resizeObserver = new ResizeObserver(() => {
+      this._resizeObserver = new ResizeObserver((entries) => {
+        const box = entries[0] && entries[0].contentRect;
+        const size = box ? Math.round(box.width) + "x" + Math.round(box.height) : "";
+        if (size === this._lastSize) return;
+        this._lastSize = size;
         this._lastKey = null;
         this._render();
       });
@@ -203,40 +227,39 @@ class MinimalWeatherLineChart extends HTMLElement {
     return "mdi:" + (CONDITION_ICONS[cond] || "weather-cloudy");
   }
 
-  // Greedy collision pass over the rendered labels: each label takes the
-  // lowest row (0 = directly above its point) where it does not overlap an
-  // already placed label. Returns one row index per forecast entry.
-  _measureLabelRows(rowHeight, count) {
-    const rows = new Array(count).fill(0);
-    const placed = [];
-    const els = this.shadowRoot.querySelectorAll(".label");
-    for (let k = 0; k < els.length; k++) {
-      const el = els[k];
-      const i = Number(el.getAttribute("data-i"));
-      const r = el.getBoundingClientRect();
-      if (!r.width) continue;
-      let row = 0;
-      for (; row < 4; row++) {
-        const top = r.top - row * rowHeight;
-        const bottom = r.bottom - row * rowHeight;
-        const hit = placed.some((p) => r.left < p.right - 1 && r.right > p.left + 1 && top < p.bottom && bottom > p.top);
-        if (!hit) break;
+  // True when any two rendered labels (or any two hour labels) overlap.
+  _hasOverlap() {
+    const overlapIn = (selector) => {
+      const rects = [];
+      this.shadowRoot.querySelectorAll(selector).forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width) rects.push(r);
+      });
+      for (let i = 0; i < rects.length; i++) {
+        for (let j = i + 1; j < rects.length; j++) {
+          const a = rects[i];
+          const b = rects[j];
+          if (a.left < b.right - 1 && a.right > b.left + 1 && a.top < b.bottom - 1 && a.bottom > b.top + 1) return true;
+        }
       }
-      if (row === 4) row = 0;
-      rows[i] = row;
-      placed.push({ left: r.left, right: r.right, top: r.top - row * rowHeight, bottom: r.bottom - row * rowHeight });
-    }
-    return rows;
+      return false;
+    };
+    return overlapIn(".label") || overlapIn(".hour");
   }
 
-  _render(labelRows) {
+  // `scale` shrinks every label font (temperature, icon, wind, unit, hour). The
+  // first render uses 1; if labels overlap and shrink_to_fit is on, _render is
+  // called again with smaller scales until nothing overlaps (see the end).
+  _render(scale) {
     if (!this._config) return;
     const c = this._config;
-    const T = c.temperature;
-    const HR = c.hour;
-    const W = c.wind_speed;
-    const WU = c.wind_unit;
-    const CI = c.condition_icon;
+    const k = scale || 1;
+    const scaled = (o) => Object.assign({}, o, { size: Math.max(6, Math.round(o.size * k * 10) / 10) });
+    const T = scaled(c.temperature);
+    const HR = scaled(c.hour);
+    const W = scaled(c.wind_speed);
+    const WU = scaled(c.wind_unit);
+    const CI = scaled(c.condition_icon);
 
     const state = this._hass && this._hass.states ? this._hass.states[c.entity] : null;
     let forecast = (this._forecast || []).filter((f) => f && f.temperature != null && f.datetime);
@@ -270,20 +293,17 @@ class MinimalWeatherLineChart extends HTMLElement {
     const labelGap = 4; // between a label and the dot below it
     const hourGap = 3; // between a dot and the hour label below it
     const hourH = Math.ceil(HR.size * 1.2) + 2;
-    const labelH = Math.max(CI.size, T.size, c.show_wind ? W.size : 0) + 2;
-    const rowH = labelH + 2;
-    const rows = labelRows || [];
-    const maxRow = rows.reduce((m, rw) => Math.max(m, rw), 0);
-    // Extra label rows (from staggering) grow the card rather than squeeze the line.
-    const extraH = maxRow * rowH;
-    const padTop = (c.padding_top == null ? labelH + labelGap + Math.max(r, c.line_width) + 2 : c.padding_top) + extraH;
+    const mainH = Math.max(CI.size, T.size) + 2;
+    const windH = c.show_wind ? Math.max(W.size, WU.size) + 2 : 0;
+    const labelH = mainH + windH; // tallest possible label
+    const padTop = c.padding_top == null ? labelH + labelGap + Math.max(r, c.line_width) + 2 : c.padding_top;
     // Room under the lowest point: its dot, then either its own hour label or the gap to the bottom row.
     const padBottom = Math.max(r, c.line_width) + hourGap + hourH;
     // The plot area is everything between padTop and padBottom. Its height is not
     // fixed: the card is chart_height tall at minimum and stretches to fill whatever
     // height its container gives it (a sections-view grid row, a stack sibling), so
     // vertical positions inside the plot are percentages.
-    const minH = c.chart_height + extraH + (c.hours_next_to_line ? 0 : hourH);
+    const minH = c.chart_height + (c.hours_next_to_line ? 0 : hourH);
 
     const temps = forecast.map((f) => Math.round(f.temperature));
     const min = n ? Math.min.apply(null, temps) : 0;
@@ -318,25 +338,20 @@ class MinimalWeatherLineChart extends HTMLElement {
         const prev = i > 0 ? forecast[i - 1] : null;
         const wind = f.wind_speed != null ? Math.round(f.wind_speed) : null;
         const prevWind = prev && prev.wind_speed != null ? Math.round(prev.wind_speed) : null;
-        const showCond = !c.hide_repeats || !prev || f.condition !== prev.condition;
-        const showTemp = !c.hide_repeats || !prev || temps[i] !== temps[i - 1];
-        const showWind = c.show_wind && wind != null && (!c.hide_repeats || !prev || wind !== prevWind);
+        const showCond = c.show_repeated_condition || !prev || f.condition !== prev.condition;
+        const showTemp = c.show_repeated_temperature || !prev || temps[i] !== temps[i - 1];
+        const showWind = c.show_wind && wind != null && (c.show_repeated_wind || !prev || wind !== prevWind);
         const at = "left:" + points[i].x.toFixed(3) + "%;top:" + points[i].y.toFixed(3) + "%;";
 
-        let inner = "";
-        if (showCond) inner += '<ha-icon class="icon" icon="' + this._iconFor(f) + '"></ha-icon>';
-        if (showTemp) inner += '<span class="temp">' + temps[i] + "\u00b0</span>";
+        let main = "";
+        if (showCond) main += '<ha-icon class="icon" icon="' + this._iconFor(f) + '"></ha-icon>';
+        if (showTemp) main += '<span class="temp">' + temps[i] + "\u00b0</span>";
+        let inner = main ? '<div class="main">' + main + "</div>" : "";
         if (showWind) {
-          inner += '<span class="wind">' + wind + '<span class="wind-unit">' + escapeHtml(unit) + "</span></span>";
+          inner += '<div class="wind">' + wind + '<span class="wind-unit">' + escapeHtml(unit) + "</span></div>";
         }
         if (r > 0) dots += '<div class="dot" style="' + at + '"></div>';
-        if (inner) {
-          const lift = labelGap + r + (rows[i] || 0) * rowH;
-          labels +=
-            '<div class="label" data-i="' + i + '" style="' + at + "transform:translate(-50%,calc(-100% - " + lift + 'px));">' +
-            inner +
-            "</div>";
-        }
+        if (inner) labels += '<div class="label" style="' + at + '">' + inner + "</div>";
         hours +=
           '<div class="hour" style="' + (c.hours_next_to_line ? at : "left:" + points[i].x.toFixed(3) + "%;bottom:0;") + '">' +
           this._formatHour(f.datetime) +
@@ -355,12 +370,14 @@ class MinimalWeatherLineChart extends HTMLElement {
       ".sep{position:absolute;top:0;bottom:0;width:1px;background:" + c.separator_color + ";}" +
       ".dot{position:absolute;width:" + 2 * r + "px;height:" + 2 * r + "px;border-radius:50%;background:" + c.dot_color + ";" +
       "transform:translate(-50%,-50%);}" +
-      ".label{position:absolute;display:flex;align-items:center;gap:3px;white-space:nowrap;line-height:1;pointer-events:none;}" +
+      ".label{position:absolute;display:flex;flex-direction:column;align-items:center;gap:2px;white-space:nowrap;" +
+      "line-height:1;pointer-events:none;transform:translate(-50%,calc(-100% - " + (labelGap + r) + "px));}" +
+      ".main{display:flex;align-items:center;gap:3px;}" +
       ".icon{--mdc-icon-size:" + CI.size + "px;width:" + CI.size + "px;height:" + CI.size + "px;color:" + CI.color + ";" +
       "background:" + CI.bg + ";border-radius:4px;display:flex;align-items:center;justify-content:center;}" +
       ".temp{font-size:" + T.size + "px;color:" + T.color + ";background:" + T.bg + ";border-radius:4px;padding:1px 2px;font-weight:600;}" +
       ".wind{font-size:" + W.size + "px;color:" + W.color + ";background:" + W.bg + ";border-radius:4px;padding:1px 2px;" +
-      "display:inline-flex;align-items:baseline;gap:1px;}" +
+      "display:flex;align-items:baseline;gap:1px;}" +
       ".wind-unit{font-size:" + WU.size + "px;color:" + WU.color + ";background:" + WU.bg + ";border-radius:3px;}" +
       ".hour{position:absolute;transform:translate(-50%," + (c.hours_next_to_line ? r + hourGap : 0) + "px);line-height:1.2;" +
       "white-space:nowrap;font-size:" + HR.size + "px;color:" + HR.color + ";background:" + HR.bg + ";border-radius:4px;padding:0 2px;}" +
@@ -377,17 +394,239 @@ class MinimalWeatherLineChart extends HTMLElement {
 
     this.shadowRoot.innerHTML = style + "<ha-card>" + body + "</ha-card>";
 
-    if (n && c.stagger_labels && !labelRows && this.isConnected) {
-      const measured = this._measureLabelRows(rowH, n);
-      if (measured.some((r) => r > 0)) {
+    // Shrink pass: step the font scale down until nothing overlaps (or 50%).
+    if (n && !scale && c.shrink_to_fit && this.isConnected && this._hasOverlap()) {
+      for (let next = 0.9; next >= 0.5; next = Math.round((next - 0.1) * 10) / 10) {
         this._lastKey = null;
-        this._render(measured);
+        this._render(next);
+        if (next <= 0.5 || !this._hasOverlap()) break;
       }
     }
   }
 }
 
 if (!customElements.get(CARD_TAG)) customElements.define(CARD_TAG, MinimalWeatherLineChart);
+
+/* ---------------------------------------------------------------------------
+ * Visual editor
+ * ------------------------------------------------------------------------- */
+
+const LABELS = {
+  entity: "Weather entity",
+  hours: "Hours shown",
+  until_midnight: "Only until midnight",
+  show_wind: "Show wind speed",
+  show_separators: "Separators between conditions",
+  hours_next_to_line: "Hour under each point",
+  shrink_to_fit: "Shrink text to fit",
+  show_repeated_condition: "Repeat condition icon",
+  show_repeated_temperature: "Repeat temperature",
+  show_repeated_wind: "Repeat wind speed",
+  chart_height: "Minimum chart height (px)",
+  padding_top: "Padding above (px)",
+  padding_bottom: "Padding below (px)",
+  padding_x: "Padding left/right (px)",
+  line_width: "Line width (px)",
+  dot_size: "Dot radius (px)",
+  line_color: "Line color",
+  dot_color: "Dot color",
+  separator_color: "Separator color",
+  background: "Card background",
+  radius: "Card corner radius (px)",
+  size: "Font size (px)",
+  color: "Text color",
+  bg: "Background color",
+  format: "Hour format",
+  label: "Unit text",
+};
+
+const HELPERS = {
+  entity: "Must support hourly forecasts.",
+  hours: "Maximum number of hours. Default 12.",
+  until_midnight: "Show only the hours before the next midnight (a 'rest of today' card). Still capped by Hours shown.",
+  show_wind: "Wind speed on its own line under the temperature, in the entity's wind unit.",
+  show_separators: "A thin vertical line wherever the condition changes, so each run of the same condition reads as a group.",
+  hours_next_to_line: "On: each hour sits right under its data point. Off: all hours in one row along the bottom.",
+  shrink_to_fit: "Shrink all label text until neighbouring labels no longer overlap. Off may cause labels to overlap.",
+  show_repeated_condition: "Off hides the icon when the condition is the same as the previous hour.",
+  show_repeated_temperature: "Off hides the temperature when it is the same as the previous hour.",
+  show_repeated_wind: "Off hides the wind speed when it is the same as the previous hour.",
+  chart_height: "The card grows to fill a taller container (e.g. a sections-view grid row). Default 84.",
+  padding_top: "Space above the highest point. Leave empty for just enough room for the labels.",
+  padding_bottom: "Card padding under the lowest content. Default 5.",
+  padding_x: "Default 8.",
+  line_width: "Default 2.",
+  dot_size: "Leave empty for line width + 2. Set 0 to remove the dots.",
+  line_color: "Any CSS color. Default rgba(255, 152, 0, 1).",
+  dot_color: "Leave empty to match the line color.",
+  separator_color: "Default var(--divider-color).",
+  background: "Default transparent. Use var(--card-background-color) for a normal card.",
+  radius: "Default 0.",
+  size: "In px.",
+  color: "Any CSS color, e.g. #ffcc80 or var(--primary-text-color).",
+  bg: "Any CSS color. Default transparent.",
+  format: "",
+  label: "Leave empty to use the entity's wind unit.",
+};
+
+const styleSchema = (extra) =>
+  [
+    { name: "size", selector: { number: { min: 6, max: 64, mode: "box" } } },
+    { name: "color", selector: { text: {} } },
+    { name: "bg", selector: { text: {} } },
+  ].concat(extra || []);
+
+const EDITOR_SCHEMA = [
+  { name: "entity", required: true, selector: { entity: { domain: "weather" } } },
+  {
+    type: "grid",
+    schema: [
+      { name: "hours", selector: { number: { min: 1, max: 48, mode: "box" } } },
+      { name: "until_midnight", selector: { boolean: {} } },
+      { name: "show_wind", selector: { boolean: {} } },
+      { name: "show_separators", selector: { boolean: {} } },
+      { name: "hours_next_to_line", selector: { boolean: {} } },
+      { name: "shrink_to_fit", selector: { boolean: {} } },
+    ],
+  },
+  {
+    type: "expandable",
+    title: "Repeated values",
+    schema: [
+      { name: "show_repeated_condition", selector: { boolean: {} } },
+      { name: "show_repeated_temperature", selector: { boolean: {} } },
+      { name: "show_repeated_wind", selector: { boolean: {} } },
+    ],
+  },
+  {
+    type: "expandable",
+    title: "Size and spacing",
+    schema: [
+      {
+        type: "grid",
+        schema: [
+          { name: "chart_height", selector: { number: { min: 20, max: 1000, mode: "box" } } },
+          { name: "padding_top", selector: { number: { min: 0, max: 200, mode: "box" } } },
+          { name: "padding_bottom", selector: { number: { min: 0, max: 200, mode: "box" } } },
+          { name: "padding_x", selector: { number: { min: 0, max: 200, mode: "box" } } },
+          { name: "line_width", selector: { number: { min: 0, max: 20, step: 0.5, mode: "box" } } },
+          { name: "dot_size", selector: { number: { min: 0, max: 30, step: 0.5, mode: "box" } } },
+        ],
+      },
+    ],
+  },
+  {
+    type: "expandable",
+    title: "Card and line colors",
+    schema: [
+      { name: "line_color", selector: { text: {} } },
+      { name: "dot_color", selector: { text: {} } },
+      { name: "separator_color", selector: { text: {} } },
+      { name: "background", selector: { text: {} } },
+      { name: "radius", selector: { number: { min: 0, max: 100, mode: "box" } } },
+    ],
+  },
+  { type: "expandable", name: "temperature", title: "Temperature text", schema: styleSchema() },
+  {
+    type: "expandable",
+    name: "hour",
+    title: "Hour text",
+    schema: styleSchema([
+      {
+        name: "format",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: [
+              { value: "12h", label: "12-hour (4pm)" },
+              { value: "24h", label: "24-hour (16:00)" },
+            ],
+          },
+        },
+      },
+    ]),
+  },
+  { type: "expandable", name: "wind_speed", title: "Wind speed text", schema: styleSchema() },
+  { type: "expandable", name: "wind_unit", title: "Wind unit text", schema: styleSchema([{ name: "label", selector: { text: {} } }]) },
+  { type: "expandable", name: "condition_icon", title: "Condition icon", schema: styleSchema() },
+];
+
+const isBlank = (v) => v == null || v === "";
+
+// Form data = defaults with the config on top, so toggles show their real state.
+const toFormData = (config) => {
+  const data = Object.assign({}, DEFAULTS, config);
+  Object.keys(STYLE_DEFAULTS).forEach((key) => {
+    data[key] = Object.assign({}, STYLE_DEFAULTS[key], config[key] || {});
+  });
+  delete data.type;
+  return data;
+};
+
+// Config = only what differs from the defaults, so the YAML stays minimal.
+const toConfig = (data) => {
+  const out = { entity: data.entity };
+  Object.keys(data).forEach((key) => {
+    const value = data[key];
+    if (STYLE_DEFAULTS[key]) {
+      const sub = {};
+      Object.keys(value || {}).forEach((k) => {
+        const v = value[k];
+        const def = STYLE_DEFAULTS[key][k];
+        if (isBlank(v) ? !isBlank(def) : v !== def) sub[k] = v;
+      });
+      if (Object.keys(sub).length) out[key] = sub;
+      return;
+    }
+    const def = DEFAULTS[key];
+    if (key === "entity" || (isBlank(value) ? !isBlank(def) : value !== def)) out[key] = value;
+  });
+  return out;
+};
+
+class MinimalWeatherLineChartEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = null;
+    this._hass = null;
+    this._form = null;
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._update();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._update();
+  }
+
+  _update() {
+    if (!this._config) return;
+    if (!this._form) {
+      this.shadowRoot.innerHTML = "<style>ha-form{display:block;}</style>";
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => LABELS[schema.name] || schema.name;
+      this._form.computeHelper = (schema) => HELPERS[schema.name] || "";
+      this._form.addEventListener("value-changed", (ev) => this._valueChanged(ev));
+      this.shadowRoot.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = EDITOR_SCHEMA;
+    this._form.data = toFormData(this._config);
+  }
+
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    const config = Object.assign({ type: this._config.type || "custom:" + CARD_TAG }, toConfig(ev.detail.value || {}));
+    this._config = config;
+    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
+  }
+}
+
+if (!customElements.get(EDITOR_TAG)) customElements.define(EDITOR_TAG, MinimalWeatherLineChartEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
