@@ -1,7 +1,7 @@
 {
-  "name": "weather-chart-card",
-  "version": "1.0.1",
-  "description": "Weather card with charts for Home Assistant Lovelace UI",
+  "name": "minimal-weather-line-chart",
+  "version": "1.0.0",
+  "description": "Minimal hourly temperature line chart card for Home Assistant",
   "keywords": [
     "home-assistant",
     "homeassistant",
@@ -10,9 +10,9 @@
     "lovelace",
     "custom-cards"
   ],
-  "module": "src/main.js",
-  "repository": "git@github.com:mlamberts78/weather-chart-card.git",
-  "author": "Marc Lamberts",
+  "module": "src/minimal-weather-line-chart.js",
+  "repository": "git@github.com:gregschwartz/minimal-weather-line-chart-home-assistant.git",
+  "author": "Greg Schwartz (forked from Marc Lamberts)",
   "license": "MIT",
   "dependencies": {
     "chart.js": "^4.4.1",

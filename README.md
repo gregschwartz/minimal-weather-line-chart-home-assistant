@@ -1,178 +1,141 @@
-<h1 align="center">Weather Chart Card</h1>
+# Minimal Weather Line Chart
 
-# No Longer Maintained
-This repository is no longer maintained. Feel free to fork it if you find it useful.
+A stripped-down hourly forecast card for Home Assistant: one temperature line, with the
+temperature, condition icon and (optionally) wind speed sitting next to each point, and
+compact hour labels underneath. Nothing else.
 
-[![Buy me a coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/mlamberts7I)
-[![PayPal](https://img.shields.io/badge/Donate-PayPal-blue?logo=paypal)](https://www.paypal.com/donate/?hosted_button_id=HZUUW64FRM2J2)
+Forked from [mlamberts78/weather-chart-card](https://github.com/mlamberts78/weather-chart-card)
+(which is no longer maintained). This repo replaces that card's forecast chart with a
+purpose-built one. The upstream card and its documentation are still in the repo
+(`src/main.js`, `docs/upstream-README.md`) for reference, but they are not what gets
+installed.
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/mlamberts78/weather-chart-card?style=flat-square)](https://github.com/mlamberts78/weather-chart-card/releases/latest)
-![GitHub downloads](https://img.shields.io/github/downloads/mlamberts78/weather-chart-card/total?style=flat-square)
-![GitHub release (latest by SemVer including pre-releases)](https://img.shields.io/github/downloads/mlamberts78/weather-chart-card/latest/total)
-[![HACS Validate](https://github.com/mlamberts78/weather-chart-card/actions/workflows/validate.yaml/badge.svg)](https://github.com/mlamberts78/weather-chart-card/actions/workflows/validate.yaml)
+## What changed from the original, and why
 
-![weather-chart-card](https://github.com/mlamberts78/weather-chart-card/assets/93537082/bd5b9f6e-4125-4a19-9773-463e6d054bce)
-![15-days](https://github.com/mlamberts78/weather-chart-card/assets/93537082/f4de6060-7005-4a6d-b1f3-3aa17c856c73)
+| Change | Reason |
+| --- | --- |
+| Temperatures are plain text, not Chart.js datalabels | On my dashboard the original card rendered each temperature as a white box with no visible number. The datalabels plugin paints a background from `--card-background-color` and text from `--primary-text-color`, and depending on the theme those resolve to the same (or an empty) color. Plain DOM text uses the theme's text color and cannot disappear. |
+| `hide_repeats` option | If the temperature or condition is the same as the previous hour, repeating it is noise. Hiding repeats leaves only the hours where something changes. |
+| Vertical separators between condition groups | With repeats hidden, an icon appears only when the condition changes. A subtle line at each change (e.g. cloudy, cloudy, cloudy, sunny, cloudy = 3 groups, 2 lines) makes it obvious how long each condition lasts. |
+| Hours are `4pm`, never `4:00 PM` | Twelve columns are narrow. The short form fits and reads faster. |
+| Much less vertical padding, and it's configurable | The original chart is 180px tall with generous padding. This one is 84px by default, with `chart_height`, `padding_top` and `padding_bottom` controls. |
+| Condition icon and wind sit next to the temperature | The original stacked icons and wind in separate rows above and below the chart. Putting everything for an hour in one group makes each hour readable at a glance. |
+| Wind is optional and off by default | Most of the time I only want the temperature line. |
+| Per-element size, color and background for temperature, hour text, wind speed, wind unit and condition icon | So the card can be tuned to any dashboard theme. |
+| `until_midnight` option | For a "rest of today" card. |
+| `hours` option | Control how many hours are shown. |
+| New card type: `custom:minimal-weather-line-chart` | A different element name so it can be installed alongside the original `weather-chart-card` without conflict. |
+| Labels stagger upward when they would overlap | Twelve hours of icon + temperature + wind do not fit in a normal-width card on one row. A label that would collide with its left neighbour is lifted one row (the card grows to fit). Turn off with `stagger_labels: false`. |
+| No Chart.js, no datalabels plugin, no canvas, no Lit | The whole card is one ~300-line file with no dependencies. |
 
 ## Installation
 
-### HACS
+### HACS (custom repository)
 
-This card is available in HACS (Home Assistant Community Store).
-HACS is a third party community store and is not included in Home Assistant out of the box.
+1. HACS → Frontend → ⋮ → Custom repositories.
+2. Add this repository's URL with category **Dashboard**.
+3. Install **Minimal Weather Line Chart** and reload the browser.
 
-#### Configuration variables:
+### Manual
 
-##### Card options
+Copy `dist/minimal-weather-line-chart.js` to `config/www/` and add it as a dashboard
+resource: Settings → Dashboards → ⋮ → Resources → `/local/minimal-weather-line-chart.js`
+(type: JavaScript module).
 
-| Name                  | Type    | Default                  | Description                                                                                        |
-| ----------------------| ------- | -------------------------|--------------------------------------------------------------------------------------------------- |
-| type                  | string  | **Required**             | Should be `custom:weather-chart-card`.                                                             |
-| entity                | string  | **Required**             | An entity_id with the `weather` domain.                                                            |
-| temp                  | string  | none                     | An entity_id for a custom temperature sensor.                                                      |
-| press                 | string  | none                     | An entity_id for a custom pressure sensor.                                                         |
-| humid                 | string  | none                     | An entity_id for a custom humidity sensor.                                                         |
-| uv                    | string  | none                     | An entity_id for a custom UV index sensor.                                                         |
-| winddir               | string  | none                     | An entity_id for a custom wind bearing sensor. Sensor should have value in degrees                 |
-| windspeed             | string  | none                     | An entity_id for a custom wind speed sensor.                                                       |
-| feels_like            | string  | none                     | An entity_id for a custom feels like temperature sensor.                                           |
-| dew_point             | string  | none                     | An entity_id for a custom dew point sensor.                                                        |
-| wind_gust_speed       | string  | none                     | An entity_id for a custom wind gust speed sensor.                                                  |
-| visibility            | string  | none                     | An entity_id for a custom visibility sensor.                                                       |
-| description           | string  | none                     | An entity_id for a custom weather description sensor.                                              |
-| title                 | string  | none                     | Card title.                                                                                        |
-| show_main             | boolean | true                     | Show or hide a section with current weather condition and temperature.                             |
-| show_temperature      | boolean | true                     | Show or hide the current temperature.                                                              |
-| show_current_condition| boolean | true                     | Show or hide the current weather condition.                                                        |
-| show_attributes       | boolean | true                     | Show or hide a section with attributes such as pressure, humidity, wind direction and speed, etc.  |
-| show_sun              | boolean | true                     | Show or hide the sunset information                                                                |
-| show_time             | boolean | false                    | Show or hide the current time on the card.                                                         |
-| show_time_seconds     | boolean | false                    | Show or hide seconds for the current time on the card.                                             |
-| show_day              | boolean | false                    | Show or hide the current day on the card. (Only visible when show_time is true.)                   |
-| show_date             | boolean | false                    | Show or hide the current date the card. (Only visible when show_time is true.)                     |
-| show_humidity         | boolean | true                     | Show or hide humidity on the card.                                                                 |
-| show_pressure         | boolean | true                     | Show or hide pressure on the card.                                                                 |
-| show_wind_direction   | boolean | true                     | Show or hide wind_direction on the card.                                                           |
-| show_wind_speed       | boolean | true                     | Show or hide wind_speed on the card.                                                               |
-| show_feels_like       | boolean | false                    | Show or hide feels like temperature on the card.                                                   |
-| show_dew_point        | boolean | false                    | Show or hide dew point on the card.                                                                |
-| show_wind_gust_speed  | boolean | false                    | Show or hide wind gust speed on the card.                                                          |
-| show_visibility       | boolean | false                    | Show or hide visibility on the card.                                                               |
-| show_description      | boolean | false                    | Show or hide the weather description on the card.                                                  |
-| show_last_changed     | boolean | false                    | Show or hide when last data changed on the card.                                                   |
-| use_12hour_format     | boolean | false                    | Display time in 12-hour format (AM/PM) instead of 24-hour format.                                  |
-| icons                 | string  | none                     | Path to the location of custom icons in svg format, for example `/local/weather-icons/`.           |
-| animated_icons        | boolean | false                    | Enable the use of animated icons                                                                   |
-| icon_style            | string  | 'style1'                 | Options are 'style1' and'style2' for different set of animated icons.                              |
-| icons_size            | number  | 25                       | The size of the animated or custom icons in pixels.                                                |
-| current_temp_size     | number  | 28                       | The size of the current temperature in pixels.                                                     |
-| time_size             | number  | 26                       | The size of the current time in pixels.                                                            |
-| day_date_size         | number  | 15                       | The size of the current day and date in pixels.                                                    |
-| forecast              | object  | none                     | See [forecast options](#forecast-options) for available options.                                   |
-| units                 | object  | none                     | See [units of measurement](#units-of-measurement) for available options.                           |
-| locale                | string  | none                     | See [Supported languages](#Supported-languages) for available languages                            |
-| autoscroll            | boolean | false                    | Update the chart each hour, hiding prior forecast datapoints                                       |
+## Usage
 
-##### Forecast options
+The weather entity must support hourly forecasts (the card subscribes to
+`weather/subscribe_forecast` with `forecast_type: hourly`). If it does not, the card says so.
 
-| Name                 | Type    | Default                  | Description                                                                                        |
-| -------------------- | ------- | -------------------------|--------------------------------------------------------------------------------------------------- |
-| precipitation_type   | string  | rainfall                 | Show precipitation in 'rainfall' or 'probability'.                                                 |
-| show_probability     | boolean | false                    | Also show probability value when precipitation_type = rainfall. (Only when available)              |
-| labels_font_size     | number  | 11                       | Font size for temperature and precipitation labels.                                                |
-| precip_bar_size      | number  | 100                      | Adjusts the thickness of precipitation bars (1-100).                                               |
-| temperature1_color   | string  | rgba(255, 152, 0, 1.0)   | Temperature first line chart color.                                                                |
-| temperature2_color   | string  | rgba(68, 115, 158, 1.0)  | Temperature second line chart color.                                                               |
-| precipitation_color  | string  | rgba(132, 209, 253, 1.0) | Precipitation bar chart color.                                                                     |
-| chart_datetime_color | string  | primary-text-color       | Chart day or hour color                                                                            |
-| chart_text_color     | string  | none                     | Chart text color                                                                                   |
-| chart_height         | number  | 180                      | Adjust the forecast chart height                                                                   |
-| condition_icons      | boolean | true                     | Show or hide forecast condition icons.                                                             |
-| show_wind_forecast   | boolean | true                     | Show or hide wind forecast on the card.                                                            |
-| round_temp           | boolean | false                    | Option for rounding the forecast temperatures                                                      |
-| style                | string  | style1                   | Change chart style, options: 'style1' or 'style2'                                                  |
-| type                 | string  | daily                    | Show daily or hourly forecast if available, options: 'daily' or 'hourly'                           |
-| number_of_forecasts  | number  | 0                        | Overrides the number of forecasts to display. Set to "0" for automatic mode.                       |
-| disable_animation    | boolean | false                    | Disable the chart animation.                                                                       |
-
-##### Units of measurement
-
-| Name                 | Type    | Default                  | Description                                                                                        |
-| -------------------- | ------- | -------------------------|--------------------------------------------------------------------------------------------------- |
-| pressure             | string  | none                     | Convert to 'hPa' or 'mmHg' or 'inHg'                                                               |
-| speed                | string  | none                     | Convert to 'km/h' or 'm/s' or 'Bft' or 'mph'                                                       |
-
-###### What custom icons can I use?
-Icons should be in svg format. Icons should have names as shown [here](https://github.com/mlamberts78/weather-chart-card/blob/master/src/const.js#L24). Example:
-![130360372-76d70c42-986c-46e3-b9b5-810f0317f94f](https://github.com/mlamberts78/weather-chart-card/assets/93537082/d3ee55a2-e64f-4354-b36d-9faf6ea37361)
-
-#### Example usage:
-###### Card with current time, date and day
-![date-time](https://github.com/mlamberts78/weather-chart-card/assets/93537082/ab2c32f7-8c6a-4a7e-84fc-f857a519a725)
 ```yaml
-type: custom:weather-chart-card
-entity: weather.weather_home
-show_time: true
-show_day: true
-show_date: true
-animated_icons: true
-icon_style: style1
-
-```
-###### Style2 chart
-![style2](https://github.com/mlamberts78/weather-chart-card/assets/93537082/3067cc43-0e80-492c-b4a5-771b1e44ea17)
-```yaml
-type: custom:weather-chart-card
-entity: weather.my_home
-forecast:
-  style: style2
-```
-###### Chart only
-![Chart-only](https://github.com/mlamberts78/weather-chart-card/assets/93537082/c99d85a4-30d1-4fd9-90ff-877421b39e9b)
-```yaml
-type: custom:weather-chart-card
-entity: weather.my_home
-show_main: false
-show_attributes: false
-forecast:
-  condition_icons: false
-  show_wind_forecast: false
+type: custom:minimal-weather-line-chart
+entity: weather.home
+hide_repeats: true
 ```
 
-###### Custom units
-![Units](https://github.com/mlamberts78/weather-chart-card/assets/93537082/e72862ee-9bb7-4f97-9a3c-b17663c458aa)
+Everything on:
+
 ```yaml
-type: custom:weather-chart-card
-entity: weather.my_home
-units:
-  pressure: mmHg
-  speed: m/s
+type: custom:minimal-weather-line-chart
+entity: weather.home
+hours: 12
+until_midnight: false
+hide_repeats: true
+show_wind: true
+chart_height: 84
+padding_bottom: 4
+line_color: "#4fc3f7"
+temperature:
+  size: 16
+  color: "#ffcc80"
+  bg: rgba(0, 0, 0, 0.5)
+hour:
+  size: 10
+  color: var(--secondary-text-color)
+  format: 12h
+wind_speed:
+  size: 10
+  color: "#80deea"
+wind_unit:
+  size: 8
+  label: mi/h
+condition_icon:
+  size: 22
+  color: "#fff59d"
+  bg: rgba(0, 0, 0, 0.5)
 ```
 
-###### Supported languages:
-| Language         | Locale  |
-| ---------------- | ------- |
-| Bulgarian        | bg      |
-| Catalan          | ca      |
-| Czech            | cs      |
-| Danish           | da      |
-| Dutch            | nl      |
-| English          | en      |
-| Finnish          | fi      |
-| French           | fr      |
-| German           | de      |
-| Greek            | el      |
-| Hungarian        | hu      |
-| Italian          | it      |
-| Lithuanian       | lt      |
-| Norwegian        | no      |
-| Polish           | pl      |
-| Portuguese       | pt      |
-| Romanian         | ro      |
-| Russian          | ru      |
-| Slovak           | sk      |
-| Spanish          | es      |
-| Swedish          | sv      |
-| Ukrainian        | uk      |
-| 한국어           | ko      |
+### Options
+
+| Name | Type | Default | Description |
+| --- | --- | --- | --- |
+| `type` | string | **required** | `custom:minimal-weather-line-chart` |
+| `entity` | string | **required** | A `weather.*` entity with hourly forecast support. |
+| `hours` | number | `12` | Maximum number of hours to show. |
+| `until_midnight` | boolean | `false` | Only show hours before the next local midnight (still capped by `hours`). Late in the evening this can leave very few hours. |
+| `hide_repeats` | boolean | `false` | Hide a temperature, condition icon or wind speed that is the same as the previous hour. |
+| `show_separators` | boolean | same as `hide_repeats` | Draw a thin vertical line wherever the condition changes. |
+| `separator_color` | string | `var(--divider-color)` | Color of the separators. |
+| `show_wind` | boolean | `false` | Show wind speed next to the temperature, in the entity's `wind_speed_unit`. |
+| `stagger_labels` | boolean | `true` | Lift a label one row when it would overlap its left neighbour. |
+| `chart_height` | number | `84` | Height in px of the line area (the hour row is added below it). |
+| `padding_top` | number | auto | Space in px above the highest point. Auto is just enough for the labels. |
+| `padding_bottom` | number | `4` | Space in px between the lowest point and the hour row. |
+| `padding_x` | number | `8` | Card side padding in px. |
+| `line_color` | string | `rgba(255, 152, 0, 1)` | Line color. |
+| `line_width` | number | `2` | Line width in px. |
+| `background` | string | `transparent` | Card background. |
+| `radius` | number | `0` | Card corner radius in px. |
+| `temperature` | object | see below | Style for the temperature. |
+| `hour` | object | see below | Style for the hour labels. Also takes `format: 12h` (default, `4pm`) or `24h` (`16:00`). |
+| `wind_speed` | object | see below | Style for the wind speed number. |
+| `wind_unit` | object | see below | Style for the wind unit. Also takes `label` to override the unit text. |
+| `condition_icon` | object | see below | Style for the condition icon. |
+
+Each style object accepts `size` (px), `color` and `bg` (any CSS color, including
+`var(--primary-text-color)`). Defaults:
+
+| Element | size | color | bg |
+| --- | --- | --- | --- |
+| `temperature` | 14 | `var(--primary-text-color)` | transparent |
+| `hour` | 11 | `var(--secondary-text-color)` | transparent |
+| `wind_speed` | 11 | `var(--primary-text-color)` | transparent |
+| `wind_unit` | 9 | `var(--secondary-text-color)` | transparent |
+| `condition_icon` | 18 | `var(--primary-text-color)` | transparent |
+
+Condition icons are Material Design Icons via `ha-icon`. When a forecast entry has
+`is_daytime: false`, `sunny` and `partlycloudy` use their night variants.
+
+## Development
+
+```
+npm install
+npm run build      # lint + rollup; writes dist/minimal-weather-line-chart.js
+```
+
+The card has no runtime dependencies, so `dist/minimal-weather-line-chart.js` is the
+source file as-is.
+
+## License
+
+MIT, same as the upstream project. See `LICENSE.md`.

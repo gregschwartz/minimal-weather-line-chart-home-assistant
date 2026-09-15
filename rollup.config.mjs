@@ -14,22 +14,34 @@ const serveopts = {
   },
 };
 
-export default {
-  input: 'src/main.js',
-  output: {
-    file: 'dist/weather-chart-card.js',
-    format: 'cjs',
-    name: 'WeatherChartCard',
-    sourcemap: dev ? true : false,
+export default [
+  // The card this repository is about.
+  {
+    input: 'src/minimal-weather-line-chart.js',
+    output: {
+      file: 'dist/minimal-weather-line-chart.js',
+      format: 'es',
+      sourcemap: dev ? true : false,
+    },
+    plugins: [resolve(), dev && serve(serveopts)],
   },
-  plugins: [
-    resolve(),
-    dev && serve(serveopts),
-    copy({
-      targets: [
-        { src: 'src/icons/*', dest: 'dist/icons' },
-        { src: 'src/icons2/*', dest: 'dist/icons2' }
-      ]
-    })
-  ],
-};
+  // The upstream weather-chart-card, kept buildable for reference.
+  {
+    input: 'src/main.js',
+    output: {
+      file: 'dist/weather-chart-card.js',
+      format: 'cjs',
+      name: 'WeatherChartCard',
+      sourcemap: dev ? true : false,
+    },
+    plugins: [
+      resolve(),
+      copy({
+        targets: [
+          { src: 'src/icons/*', dest: 'dist/icons' },
+          { src: 'src/icons2/*', dest: 'dist/icons2' }
+        ]
+      })
+    ],
+  },
+];
