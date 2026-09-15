@@ -10,7 +10,7 @@
  */
 
 const CARD_TAG = "minimal-weather-line-chart";
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.1.0";
 
 const CONDITION_ICONS = {
   "clear-night": "weather-night",
@@ -266,7 +266,6 @@ class MinimalWeatherLineChart extends HTMLElement {
     this._lastKey = key;
 
     const n = forecast.length;
-    const H = c.chart_height;
     const r = c.dot_size;
     const labelGap = 4; // between a label and the dot below it
     const hourGap = 3; // between a dot and the hour label below it
@@ -277,40 +276,39 @@ class MinimalWeatherLineChart extends HTMLElement {
     const maxRow = rows.reduce((m, rw) => Math.max(m, rw), 0);
     // Extra label rows (from staggering) grow the card rather than squeeze the line.
     const extraH = maxRow * rowH;
-    const padTop = (c.padding_top == null ? labelH + labelGap + Math.max(r, c.line_width) : c.padding_top) + extraH;
+    const padTop = (c.padding_top == null ? labelH + labelGap + Math.max(r, c.line_width) + 2 : c.padding_top) + extraH;
     // Room under the lowest point: its dot, then either its own hour label or the gap to the bottom row.
-    const padBottom = Math.max(r, c.line_width) + hourGap + (c.hours_next_to_line ? hourH : 0);
-    const innerH = Math.max(4, H + extraH - padTop - padBottom);
-    const totalH = H + extraH + (c.hours_next_to_line ? 0 : hourH);
+    const padBottom = Math.max(r, c.line_width) + hourGap + hourH;
+    // The plot area is everything between padTop and padBottom. Its height is not
+    // fixed: the card is chart_height tall at minimum and stretches to fill whatever
+    // height its container gives it (a sections-view grid row, a stack sibling), so
+    // vertical positions inside the plot are percentages.
+    const minH = c.chart_height + extraH + (c.hours_next_to_line ? 0 : hourH);
 
     const temps = forecast.map((f) => Math.round(f.temperature));
     const min = n ? Math.min.apply(null, temps) : 0;
     const max = n ? Math.max.apply(null, temps) : 0;
     const span = max - min;
     const colW = n ? 100 / n : 100;
-    const yOf = (t) => (span === 0 ? padTop + innerH / 2 : padTop + ((max - t) / span) * innerH);
+    const yOf = (t) => (span === 0 ? 50 : ((max - t) / span) * 100);
     const points = temps.map((t, i) => ({ x: colW * (i + 0.5), y: yOf(t) }));
 
     let svg = "";
+    let separators = "";
     let labels = "";
     let hours = "";
     let dots = "";
     if (n) {
-      let separators = "";
       if (c.show_separators) {
         for (let i = 1; i < n; i++) {
           if (forecast[i].condition !== forecast[i - 1].condition) {
-            const x = (colW * i).toFixed(3);
-            separators +=
-              '<line x1="' + x + '" y1="0" x2="' + x + '" y2="' + totalH + '" stroke="' + c.separator_color +
-              '" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+            separators += '<div class="sep" style="left:' + (colW * i).toFixed(3) + '%;"></div>';
           }
         }
       }
-      const poly = points.map((p) => p.x.toFixed(3) + "," + p.y.toFixed(2)).join(" ");
+      const poly = points.map((p) => p.x.toFixed(3) + "," + p.y.toFixed(3)).join(" ");
       svg =
-        '<svg class="chart" viewBox="0 0 100 ' + totalH + '" preserveAspectRatio="none" aria-hidden="true">' +
-        separators +
+        '<svg class="chart" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
         '<polyline points="' + poly + '" fill="none" stroke="' + c.line_color + '" stroke-width="' + c.line_width +
         '" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>' +
         "</svg>";
@@ -323,26 +321,24 @@ class MinimalWeatherLineChart extends HTMLElement {
         const showCond = !c.hide_repeats || !prev || f.condition !== prev.condition;
         const showTemp = !c.hide_repeats || !prev || temps[i] !== temps[i - 1];
         const showWind = c.show_wind && wind != null && (!c.hide_repeats || !prev || wind !== prevWind);
+        const at = "left:" + points[i].x.toFixed(3) + "%;top:" + points[i].y.toFixed(3) + "%;";
 
         let inner = "";
         if (showCond) inner += '<ha-icon class="icon" icon="' + this._iconFor(f) + '"></ha-icon>';
-        if (showTemp) inner += '<span class="temp">' + temps[i] + "°</span>";
+        if (showTemp) inner += '<span class="temp">' + temps[i] + "\u00b0</span>";
         if (showWind) {
           inner += '<span class="wind">' + wind + '<span class="wind-unit">' + escapeHtml(unit) + "</span></span>";
         }
-        if (r > 0) {
-          dots += '<div class="dot" style="left:' + points[i].x.toFixed(3) + "%;top:" + points[i].y.toFixed(2) + 'px;"></div>';
-        }
+        if (r > 0) dots += '<div class="dot" style="' + at + '"></div>';
         if (inner) {
-          const y = points[i].y - (rows[i] || 0) * rowH - r;
+          const lift = labelGap + r + (rows[i] || 0) * rowH;
           labels +=
-            '<div class="label" data-i="' + i + '" style="left:' + points[i].x.toFixed(3) + "%;top:" + y.toFixed(2) + 'px;">' +
+            '<div class="label" data-i="' + i + '" style="' + at + "transform:translate(-50%,calc(-100% - " + lift + 'px));">' +
             inner +
             "</div>";
         }
-        const hourPos = c.hours_next_to_line ? "top:" + (points[i].y + r + hourGap).toFixed(2) + "px;" : "bottom:0;";
         hours +=
-          '<div class="hour" style="left:' + points[i].x.toFixed(3) + "%;" + hourPos + '">' +
+          '<div class="hour" style="' + (c.hours_next_to_line ? at : "left:" + points[i].x.toFixed(3) + "%;bottom:0;") + '">' +
           this._formatHour(f.datetime) +
           "</div>";
       }
@@ -350,29 +346,34 @@ class MinimalWeatherLineChart extends HTMLElement {
 
     const style =
       "<style>" +
+      ":host{display:block;height:100%;}" +
       "ha-card{background:" + c.background + ";border:none;box-shadow:none;border-radius:" + c.radius + "px;" +
-      "padding:0 " + c.padding_x + "px " + c.padding_bottom + "px;overflow:visible;}" +
-      ".wrap{position:relative;width:100%;height:" + totalH + "px;}" +
-      ".chart{position:absolute;left:0;top:0;width:100%;height:" + totalH + "px;overflow:visible;display:block;}" +
+      "padding:0 " + c.padding_x + "px " + c.padding_bottom + "px;box-sizing:border-box;height:100%;overflow:visible;}" +
+      ".wrap{position:relative;width:100%;height:100%;min-height:" + minH + "px;}" +
+      ".plot{position:absolute;left:0;right:0;top:" + padTop + "px;bottom:" + padBottom + "px;}" +
+      ".chart{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;display:block;}" +
+      ".sep{position:absolute;top:0;bottom:0;width:1px;background:" + c.separator_color + ";}" +
       ".dot{position:absolute;width:" + 2 * r + "px;height:" + 2 * r + "px;border-radius:50%;background:" + c.dot_color + ";" +
       "transform:translate(-50%,-50%);}" +
-      ".label{position:absolute;transform:translate(-50%,calc(-100% - " + labelGap + "px));display:flex;align-items:center;gap:3px;" +
-      "white-space:nowrap;line-height:1;pointer-events:none;}" +
+      ".label{position:absolute;display:flex;align-items:center;gap:3px;white-space:nowrap;line-height:1;pointer-events:none;}" +
       ".icon{--mdc-icon-size:" + CI.size + "px;width:" + CI.size + "px;height:" + CI.size + "px;color:" + CI.color + ";" +
       "background:" + CI.bg + ";border-radius:4px;display:flex;align-items:center;justify-content:center;}" +
       ".temp{font-size:" + T.size + "px;color:" + T.color + ";background:" + T.bg + ";border-radius:4px;padding:1px 2px;font-weight:600;}" +
       ".wind{font-size:" + W.size + "px;color:" + W.color + ";background:" + W.bg + ";border-radius:4px;padding:1px 2px;" +
       "display:inline-flex;align-items:baseline;gap:1px;}" +
       ".wind-unit{font-size:" + WU.size + "px;color:" + WU.color + ";background:" + WU.bg + ";border-radius:3px;}" +
-      ".hours{position:absolute;left:0;right:0;top:0;bottom:0;pointer-events:none;}" +
-      ".hour{position:absolute;transform:translateX(-50%);line-height:1.2;white-space:nowrap;" +
-      "font-size:" + HR.size + "px;color:" + HR.color + ";background:" + HR.bg + ";border-radius:4px;padding:0 2px;}" +
+      ".hour{position:absolute;transform:translate(-50%," + (c.hours_next_to_line ? r + hourGap : 0) + "px);line-height:1.2;" +
+      "white-space:nowrap;font-size:" + HR.size + "px;color:" + HR.color + ";background:" + HR.bg + ";border-radius:4px;padding:0 2px;}" +
       ".message{font-size:12px;color:var(--secondary-text-color);padding:8px 0;}" +
       "</style>";
 
+    // Hours under their points live inside the plot (percent positions); the bottom
+    // row lives in the wrap, below the plot.
+    const hoursIn = c.hours_next_to_line ? hours : "";
+    const hoursBelow = c.hours_next_to_line ? "" : hours;
     const body = message
       ? '<div class="message">' + escapeHtml(message) + "</div>"
-      : '<div class="wrap">' + svg + '<div class="dots">' + dots + '</div><div class="labels">' + labels + '</div><div class="hours">' + hours + "</div></div>";
+      : '<div class="wrap">' + separators + '<div class="plot">' + svg + dots + labels + hoursIn + "</div>" + hoursBelow + "</div>";
 
     this.shadowRoot.innerHTML = style + "<ha-card>" + body + "</ha-card>";
 

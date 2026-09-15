@@ -70,7 +70,7 @@ standard dark and light themes.
 
 | Name | Default | Description |
 | --- | --- | --- |
-| `chart_height` | `84` | Height in px of the line area, including the room for labels above and hours below. With `hours_next_to_line: false` the hour row is added below this. |
+| `chart_height` | `84` | Minimum height in px of the line area, including the room for labels above and hours below. With `hours_next_to_line: false` the hour row is added below this. |
 | `padding_top` | auto | Space in px above the highest point. Auto is just enough for the labels. |
 | `padding_bottom` | `5` | Card padding in px below the lowest content. |
 | `padding_x` | `8` | Card padding in px on the left and right. |
@@ -78,7 +78,12 @@ standard dark and light themes.
 | `dot_size` | `line_width + 2` | Radius in px of the dot at each data point. `0` removes the dots. Dots mark the hours whose values are hidden by `hide_repeats`. |
 | `stagger_labels` | `true` | When a label would overlap its left neighbour, lift it one row and grow the card to fit. `false` lets labels collide. |
 
-![Layout: dot_size, dot_color, chart_height, padding_bottom, stagger_labels](docs/screenshots/layout.png)
+The card fills whatever height its container gives it. In a sections view, set the
+card's `rows` in the layout options (or `grid_options: rows: 4`) and the line stretches to
+use the full height. In a masonry view, where nothing sets a height, the card is exactly
+`chart_height` tall.
+
+![Layout: dot_size, dot_color, chart_height, padding_bottom, stagger_labels, filling a tall container](docs/screenshots/layout.png)
 
 ### Colors and text
 
@@ -155,7 +160,7 @@ condition_icon:
 | Dots on every data point | The line still has a point for every hour even when its label is hidden. The dots make those hours visible. |
 | Hours are `4pm`, never `4:00 PM` | Twelve columns are narrow. The short form fits and reads faster. |
 | Hour label under each point | Reading a value and then hunting for its hour along the bottom edge is slow. Keeping them together is faster. The bottom row is still available. |
-| Much less vertical space, all of it configurable | The original chart is 180px tall with generous padding. This one is 84px by default, with controls for height, top padding, bottom padding and side padding. |
+| Much less vertical space, all of it configurable | The original chart is 180px tall with generous padding. This one is 84px by default, with controls for height, top padding, bottom padding and side padding, and it stretches to fill a taller container when the layout gives it one. |
 | Condition icon and wind next to the temperature | The original stacked icons and wind in separate rows above and below the chart. Everything for one hour is now one group. |
 | Wind is optional and off by default | Most of the time only the temperature line matters. |
 | Per-element size, color and background | So the card can match any dashboard theme. |
