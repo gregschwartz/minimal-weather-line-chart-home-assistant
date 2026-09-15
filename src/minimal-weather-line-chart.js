@@ -43,12 +43,15 @@ const DEFAULTS = {
   hide_repeats: false,
   show_separators: null, // null -> follows hide_repeats
   stagger_labels: true, // lift a label one row when it would overlap its left neighbour
-  chart_height: 84, // px, the line area (hour row is added below it)
+  hours_next_to_line: true, // hour label directly under each point instead of a row at the bottom
+  chart_height: 84, // px, the line area including label room (a bottom hour row is added below it)
   padding_top: null, // px above the highest point; null -> just enough for the labels
-  padding_bottom: 4, // px between the lowest point and the hour row
+  padding_bottom: 5, // px card padding below the lowest content
   padding_x: 8, // px card side padding
   line_color: "rgba(255, 152, 0, 1)",
   line_width: 2,
+  dot_size: null, // px radius of the dot at each data point; null -> line_width + 2
+  dot_color: null, // null -> line_color
   separator_color: "var(--divider-color, rgba(128, 128, 128, 0.4))",
   background: "transparent",
   radius: 0,
@@ -66,6 +69,7 @@ const escapeHtml = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const num = (v, fallback) => {
+  if (v == null || v === "") return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 };
@@ -101,6 +105,8 @@ class MinimalWeatherLineChart extends HTMLElement {
     merged.padding_x = num(merged.padding_x, DEFAULTS.padding_x);
     merged.radius = num(merged.radius, DEFAULTS.radius);
     merged.padding_top = merged.padding_top == null ? null : num(merged.padding_top, null);
+    merged.dot_size = Math.max(0, num(merged.dot_size, merged.line_width + 2));
+    merged.dot_color = merged.dot_color || merged.line_color;
     if (merged.show_separators == null) merged.show_separators = !!merged.hide_repeats;
 
     const entityChanged = !this._config || this._config.entity !== merged.entity;
@@ -261,17 +267,21 @@ class MinimalWeatherLineChart extends HTMLElement {
 
     const n = forecast.length;
     const H = c.chart_height;
-    const hoursH = HR.size + 6;
+    const r = c.dot_size;
+    const labelGap = 4; // between a label and the dot below it
+    const hourGap = 3; // between a dot and the hour label below it
+    const hourH = Math.ceil(HR.size * 1.2) + 2;
     const labelH = Math.max(CI.size, T.size, c.show_wind ? W.size : 0) + 2;
     const rowH = labelH + 2;
     const rows = labelRows || [];
-    const maxRow = rows.reduce((m, r) => Math.max(m, r), 0);
+    const maxRow = rows.reduce((m, rw) => Math.max(m, rw), 0);
     // Extra label rows (from staggering) grow the card rather than squeeze the line.
     const extraH = maxRow * rowH;
-    const padTop = (c.padding_top == null ? labelH + 4 + c.line_width : c.padding_top) + extraH;
-    const padBottom = c.padding_bottom;
+    const padTop = (c.padding_top == null ? labelH + labelGap + Math.max(r, c.line_width) : c.padding_top) + extraH;
+    // Room under the lowest point: its dot, then either its own hour label or the gap to the bottom row.
+    const padBottom = Math.max(r, c.line_width) + hourGap + (c.hours_next_to_line ? hourH : 0);
     const innerH = Math.max(4, H + extraH - padTop - padBottom);
-    const totalH = H + extraH + hoursH;
+    const totalH = H + extraH + (c.hours_next_to_line ? 0 : hourH);
 
     const temps = forecast.map((f) => Math.round(f.temperature));
     const min = n ? Math.min.apply(null, temps) : 0;
@@ -284,6 +294,7 @@ class MinimalWeatherLineChart extends HTMLElement {
     let svg = "";
     let labels = "";
     let hours = "";
+    let dots = "";
     if (n) {
       let separators = "";
       if (c.show_separators) {
@@ -319,24 +330,33 @@ class MinimalWeatherLineChart extends HTMLElement {
         if (showWind) {
           inner += '<span class="wind">' + wind + '<span class="wind-unit">' + escapeHtml(unit) + "</span></span>";
         }
+        if (r > 0) {
+          dots += '<div class="dot" style="left:' + points[i].x.toFixed(3) + "%;top:" + points[i].y.toFixed(2) + 'px;"></div>';
+        }
         if (inner) {
-          const y = points[i].y - (rows[i] || 0) * rowH;
+          const y = points[i].y - (rows[i] || 0) * rowH - r;
           labels +=
             '<div class="label" data-i="' + i + '" style="left:' + points[i].x.toFixed(3) + "%;top:" + y.toFixed(2) + 'px;">' +
             inner +
             "</div>";
         }
-        hours += '<div class="hour" style="left:' + points[i].x.toFixed(3) + '%;">' + this._formatHour(f.datetime) + "</div>";
+        const hourPos = c.hours_next_to_line ? "top:" + (points[i].y + r + hourGap).toFixed(2) + "px;" : "bottom:0;";
+        hours +=
+          '<div class="hour" style="left:' + points[i].x.toFixed(3) + "%;" + hourPos + '">' +
+          this._formatHour(f.datetime) +
+          "</div>";
       }
     }
 
     const style =
       "<style>" +
       "ha-card{background:" + c.background + ";border:none;box-shadow:none;border-radius:" + c.radius + "px;" +
-      "padding:0 " + c.padding_x + "px;overflow:visible;}" +
+      "padding:0 " + c.padding_x + "px " + c.padding_bottom + "px;overflow:visible;}" +
       ".wrap{position:relative;width:100%;height:" + totalH + "px;}" +
       ".chart{position:absolute;left:0;top:0;width:100%;height:" + totalH + "px;overflow:visible;display:block;}" +
-      ".label{position:absolute;transform:translate(-50%,calc(-100% - 4px));display:flex;align-items:center;gap:3px;" +
+      ".dot{position:absolute;width:" + 2 * r + "px;height:" + 2 * r + "px;border-radius:50%;background:" + c.dot_color + ";" +
+      "transform:translate(-50%,-50%);}" +
+      ".label{position:absolute;transform:translate(-50%,calc(-100% - " + labelGap + "px));display:flex;align-items:center;gap:3px;" +
       "white-space:nowrap;line-height:1;pointer-events:none;}" +
       ".icon{--mdc-icon-size:" + CI.size + "px;width:" + CI.size + "px;height:" + CI.size + "px;color:" + CI.color + ";" +
       "background:" + CI.bg + ";border-radius:4px;display:flex;align-items:center;justify-content:center;}" +
@@ -344,15 +364,15 @@ class MinimalWeatherLineChart extends HTMLElement {
       ".wind{font-size:" + W.size + "px;color:" + W.color + ";background:" + W.bg + ";border-radius:4px;padding:1px 2px;" +
       "display:inline-flex;align-items:baseline;gap:1px;}" +
       ".wind-unit{font-size:" + WU.size + "px;color:" + WU.color + ";background:" + WU.bg + ";border-radius:3px;}" +
-      ".hours{position:absolute;left:0;right:0;bottom:0;height:" + hoursH + "px;}" +
-      ".hour{position:absolute;bottom:0;transform:translateX(-50%);line-height:1.2;white-space:nowrap;" +
+      ".hours{position:absolute;left:0;right:0;top:0;bottom:0;pointer-events:none;}" +
+      ".hour{position:absolute;transform:translateX(-50%);line-height:1.2;white-space:nowrap;" +
       "font-size:" + HR.size + "px;color:" + HR.color + ";background:" + HR.bg + ";border-radius:4px;padding:0 2px;}" +
       ".message{font-size:12px;color:var(--secondary-text-color);padding:8px 0;}" +
       "</style>";
 
     const body = message
       ? '<div class="message">' + escapeHtml(message) + "</div>"
-      : '<div class="wrap">' + svg + '<div class="labels">' + labels + '</div><div class="hours">' + hours + "</div></div>";
+      : '<div class="wrap">' + svg + '<div class="dots">' + dots + '</div><div class="labels">' + labels + '</div><div class="hours">' + hours + "</div></div>";
 
     this.shadowRoot.innerHTML = style + "<ha-card>" + body + "</ha-card>";
 
